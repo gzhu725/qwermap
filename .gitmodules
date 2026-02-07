@@ -1,0 +1,3 @@
+[submodule "qwermap-ui"]
+	path = qwermap-ui
+	url = https://github.com/arniber21/qwermap-ui.git
