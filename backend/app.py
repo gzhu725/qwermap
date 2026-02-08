@@ -3,7 +3,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pymongo import MongoClient, ASCENDING
 from datetime import datetime, timezone
+from bson import ObjectId
 import os
+
 
 # Global Vars
 
@@ -121,6 +123,39 @@ def submit_place():
         "status": "pending"
     }), 201
 
+
+# get place by id (transaction or regular id?)
+@app.route("/places/<place_id>", methods=["GET"])
+def get_place_by_id(place_id):
+    place = None
+    if ObjectId.is_valid(place_id):
+        # get by id 
+        place = places_collection.find_one({"_id": ObjectId(place_id)})
+    
+    # if not found, try by transaction id (associated with solana?)
+    if not place:
+        place = places_collection.find_one({"transaction_id": place_id})
+    
+    if not place:
+        return jsonify({"error": "Place not found"}), 404
+
+    place_json = {
+        "id": str(place["_id"]),
+        "transaction_id": place.get("transaction_id"),
+        "name": place.get("name"),
+        "description": place.get("description"),
+        "location": place.get("location"),
+        "place_type": place.get("place_type"),
+        "category": place.get("category"),
+        "era": place.get("era"),
+        "address": place.get("address"),
+        "status": place.get("status"),
+        "upvote_count": place.get("upvote_count", 0),
+        "safety_score": place.get("safety_score", 0),
+        "created_at": place.get("created_at").isoformat() if place.get("created_at") else None
+    }
+
+    return jsonify(place_json), 200
 
 if __name__ == "__main__":
     app.run(debug=True, port=8000)
