@@ -1,88 +1,126 @@
+import uuid
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from pymongo import MongoClient, ASCENDING
+from datetime import datetime, timezone
 import os
-# from models import User, Food
+
+# Global Vars
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000"]) # ?
 
-# get 
+
+MONGO_URI = os.getenv("MONGO_URI")
+client = MongoClient(MONGO_URI)
+
+db = client["qwermapdb"]          # your database name
+places_collection = db["places"]     # your collection name
+
+
+# get list of places near a location
 @app.route("/places", methods=["GET"])
 def get_places():
-    # get required params
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "lat and lon required"}), 400
 
+    radius = int(request.args.get("radius", 5000))  # meters
+    place_type = request.args.get("type")
+    category = request.args.get("category")
+    status = request.args.get("status")
+    limit = min(int(request.args.get("limit", 50)), 100)
+    offset = int(request.args.get("offset", 0))
 
+    query = {
+        "location": {
+            "$near": {
+                "$geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "$maxDistance": radius
+            }
+        }
+    }
+
+    if place_type:
+        query["place_type"] = place_type
+    if category:
+        query["category"] = category
+    if status:
+        query["status"] = status
+
+    cursor = places_collection.find(query).skip(offset).limit(limit)
+    total = places_collection.count_documents(query)
+
+    places = []
+    for p in cursor:
+        places.append({
+            "id": str(p["_id"]),
+            "name": p["name"],
+            "location": p["location"],
+            "place_type": p["place_type"],
+            "category": p["category"],
+            "status": p.get("status", "pending"),
+            "created_at": p.get("created_at").isoformat() if p.get("created_at") else None
+        })
+
+    return jsonify({
+        "places": places,
+        "total": total,
+        "offset": offset,
+        "limit": limit
+    })
+
+# submit a new place to DB
+@app.route("/places", methods=["POST"])
+def submit_place():
+    data = request.json
+
+    fingerprint = request.headers.get("X-Client-Fingerprint")
+    if not fingerprint:
+        return jsonify({
+            "error": "Bad Request",
+            "message": "Missing X-Client-Fingerprint header"
+        }), 400
+
+    # make sure all required params included
+    required = ["name", "location", "place_type", "category"]
+    for field in required:
+        if field not in data:
+            return jsonify({
+                "error": "Bad Request",
+                "message": f"Missing required field: {field}"
+            }), 400
     
+    # TODO: solana logic? including fake id below also how to fake 429?
 
+    fake_tx_id = f"DEV_TX_{uuid.uuid4().hex}"
 
-# # need image, user, then adds food based on image
-# @app.route("/detect-food", methods=["POST"])
-# def detect_food():
-#     # --- USER ID REQUIRED ---
-#     user_id = request.form.get("user_id")
-#     if not user_id:
-#         return jsonify({"error": "user_id is required"}), 400
+    place_doc = {
+        "transaction_id": fake_tx_id,
+        "name": data["name"],
+        "description": data.get("description"),
+        "location": data["location"],  # GeoJSON
+        "place_type": data["place_type"],
+        "category": data["category"],
+        "era": data.get("era"),
+        "address": data.get("address"),
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc),
+        "upvote_count": 0,
+        "safety_score": 0
+    }
 
-#     # UUID lookup
-#     try:
-#         user_uuid = uuid.UUID(user_id)
-#     except ValueError:
-#         return jsonify({"error": "Invalid user_id format"}), 400
+    result = places_collection.insert_one(place_doc)
+    place_id = str(result.inserted_id)
 
-#     user = User.objects(id=user_uuid).first()
-#     if not user:
-#         return jsonify({"error": "User not found"}), 404
+    return jsonify({
+        "transaction_id": fake_tx_id,
+        "place_id": place_id,
+        "status": "pending"
+    }), 201
 
-#     # --- FILE HANDLING ---
-#     if "file" not in request.files:
-#         return jsonify({"result": "No file uploaded"}), 400
-
-#     file = request.files["file"]
-#     os.makedirs("images", exist_ok=True)
-#     file_path = os.path.join("images", file.filename)
-#     file.save(file_path)
-
-#     # --- RUN IMAGE DETECTION ---
-#     items = recognize_items(file_path)
-#     if not items.items:
-#         return jsonify({"result": "Food could not be detected."})
-
-#     saved_items = []  # IMPORTANT
-
-#     for f in items.items:
-#         name = f.name or "Unknown"
-#         quantity = (f.quantity or "medium").lower()
-#         if quantity not in ("small", "medium", "large"):
-#             quantity = "medium"
-
-#         # --- EXPIRATION DATE ---
-#         exp_info = get_food_expiration(name)
-#         expiration_date = exp_info.get("expiration_date")
-
-#         # fallback if nothing returned
-#         if not expiration_date:
-#             expiration_date = fallback_expiration(name)
-
-#         # --- SAVE TO DATABASE ---
-#         food = Food(
-#             user=user,
-#             name=name,
-#             quantity=quantity,
-#             expiration_date=expiration_date
-#         )
-#         food.save()
-
-#         saved_items.append({
-#             "name": name,
-#             "quantity": quantity,
-#             "expiration_date": expiration_date.isoformat(),
-#             "food_id": str(food.id)
-#         })
-
-#     return jsonify({
-#         "result": "success",
-#         "items_saved": saved_items
-#     })
 
 if __name__ == "__main__":
     app.run(debug=True, port=8000)
