@@ -1,6 +1,8 @@
+import uuid
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING
+from datetime import datetime, timezone
 import os
 
 # Global Vars
@@ -13,71 +15,111 @@ MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 
 db = client["qwermapdb"]          # your database name
-collection = db["places"]     # your collection name
+places_collection = db["places"]     # your collection name
 
 
 # get list of places near a location
 @app.route("/places", methods=["GET"])
 def get_places():
-    # get required params
     try:
-        lat = float(request.args.get('lat'))
-        lon = float(request.args.get('lon'))
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
     except (TypeError, ValueError):
-        return jsonify({"error": "Lat and lon are required and must be valid numbers"}), 400
+        return jsonify({"error": "lat and lon required"}), 400
 
-    # get optional params
-    radius = int(request.args.get("radius", 5000)) / 6378137  # convert meters to radians for $geoWithin??
-    place_type = request.args.get("type", "all") # current, historical, all
-    category = request.args.get("category") # enum: [bar, cafe, library, community_center, bookstore, park, art_space, other]
-    status = request.args.get("status") # enum: [pending, approved, rejected]
+    radius = int(request.args.get("radius", 5000))  # meters
+    place_type = request.args.get("type")
+    category = request.args.get("category")
+    status = request.args.get("status")
     limit = min(int(request.args.get("limit", 50)), 100)
     offset = int(request.args.get("offset", 0))
 
-    # build mongo query
     query = {
         "location": {
-            "$geoWithin": {
-                "$centerSphere": [[lon, lat], radius]
+            "$near": {
+                "$geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "$maxDistance": radius
             }
         }
     }
 
-    if place_type in ("current", "historical"):
+    if place_type:
         query["place_type"] = place_type
     if category:
         query["category"] = category
     if status:
         query["status"] = status
 
-    # use query 
-    places_cursor = places_collection.find(query).skip(offset).limit(limit).sort("created_at", ASCENDING)
-    total_count = places_collection.count_documents(query)
+    cursor = places_collection.find(query).skip(offset).limit(limit)
+    total = places_collection.count_documents(query)
 
-    # create response
     places = []
-    for place in places_cursor:
+    for p in cursor:
         places.append({
-            "id": str(place["_id"]),
-            "transaction_id": place.get("transaction_id"),
-            "name": place.get("name"),
-            "location": place.get("location"),
-            "place_type": place.get("place_type"),
-            "category": place.get("category"),
-            "safety_score": place.get("safety_score", 0),
-            "upvote_count": place.get("upvote_count", 0),
-            "distance_meters": None,  # optional: can compute later
-            "status": place.get("status", "pending"),
-            "created_at": place.get("created_at").isoformat() if place.get("created_at") else None
+            "id": str(p["_id"]),
+            "name": p["name"],
+            "location": p["location"],
+            "place_type": p["place_type"],
+            "category": p["category"],
+            "status": p.get("status", "pending"),
+            "created_at": p.get("created_at").isoformat() if p.get("created_at") else None
         })
 
     return jsonify({
         "places": places,
-        "total": total_count,
+        "total": total,
         "offset": offset,
         "limit": limit
     })
 
+# submit a new place to DB
+@app.route("/places", methods=["POST"])
+def submit_place():
+    data = request.json
+
+    fingerprint = request.headers.get("X-Client-Fingerprint")
+    if not fingerprint:
+        return jsonify({
+            "error": "Bad Request",
+            "message": "Missing X-Client-Fingerprint header"
+        }), 400
+
+    # make sure all required params included
+    required = ["name", "location", "place_type", "category"]
+    for field in required:
+        if field not in data:
+            return jsonify({
+                "error": "Bad Request",
+                "message": f"Missing required field: {field}"
+            }), 400
+    
+    # TODO: solana logic? including fake id below also how to fake 429?
+
+    fake_tx_id = f"DEV_TX_{uuid.uuid4().hex}"
+
+    place_doc = {
+        "transaction_id": fake_tx_id,
+        "name": data["name"],
+        "description": data.get("description"),
+        "location": data["location"],  # GeoJSON
+        "place_type": data["place_type"],
+        "category": data["category"],
+        "era": data.get("era"),
+        "address": data.get("address"),
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc),
+        "upvote_count": 0,
+        "safety_score": 0
+    }
+
+    result = places_collection.insert_one(place_doc)
+    place_id = str(result.inserted_id)
+
+    return jsonify({
+        "transaction_id": fake_tx_id,
+        "place_id": place_id,
+        "status": "pending"
+    }), 201
 
 
 if __name__ == "__main__":
