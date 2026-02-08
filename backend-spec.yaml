@@ -304,7 +304,7 @@ paths:
 
 components:
   schemas:
-    PlaceSubmission:
+    Place:
       type: object
       required:
         - name

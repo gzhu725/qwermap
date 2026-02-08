@@ -1,10 +1,12 @@
 import uuid
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from pymongo import MongoClient, ASCENDING
-from datetime import datetime, timezone
-from bson import ObjectId
+from mongoengine import connect, DoesNotExist
 import os
+
+# Import your models
+from models import Place, PlaceSummary, PlaceDetail, GeoJSONPoint, OnChainData
 
 # TODO: INTEGRATE SOLANA?
 # Global Vars
@@ -12,12 +14,10 @@ import os
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000"]) # ?
 
-
 MONGO_URI = os.getenv("MONGO_URI")
-client = MongoClient(MONGO_URI)
+MONGO_DB = os.getenv("MONGO_DB", "qwermapdb")
 
-db = client["qwermapdb"]          # your database name
-places_collection = db["places"]     # your collection name
+connect(db=MONGO_DB, host=MONGO_URI)
 
 
 # get list of places near a location
@@ -36,36 +36,45 @@ def get_places():
     limit = min(int(request.args.get("limit", 50)), 100)
     offset = int(request.args.get("offset", 0))
 
-    query = {
-        "location": {
-            "$near": {
-                "$geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "$maxDistance": radius
-            }
-        }
-    }
-
+    filters = {}
     if place_type:
-        query["place_type"] = place_type
+        filters["place_type"] = place_type
     if category:
-        query["category"] = category
+        filters["category"] = category
     if status:
-        query["status"] = status
+        filters["summary.status"] = status
 
-    cursor = places_collection.find(query).skip(offset).limit(limit)
-    total = places_collection.count_documents(query)
+    pipeline = [
+        {
+            "$geoNear": {
+                "near": {"type": "Point", "coordinates": [lon, lat]},
+                "distanceField": "distance_meters",
+                "maxDistance": radius,
+                "spherical": True,
+                "query": filters
+            }
+        },
+        {"$skip": offset},
+        {"$limit": limit}
+    ]
+
+    places_cursor = Place.objects.aggregate(*pipeline)
 
     places = []
-    for p in cursor:
+    for p in places_cursor:
         places.append({
-            "id": str(p["_id"]),
-            "name": p["name"],
-            "location": p["location"],
-            "place_type": p["place_type"],
-            "category": p["category"],
-            "status": p.get("status", "pending"),
-            "created_at": p.get("created_at").isoformat() if p.get("created_at") else None
+            "id": str(p.get("_id")),
+            "transaction_id": p.get("summary", {}).get("transaction_id") if p.get("summary") else None,
+            "name": p.get("name"),
+            "location": p.get("location"),
+            "place_type": p.get("place_type"),
+            "category": p.get("category"),
+            "status": p.get("summary", {}).get("status") if p.get("summary") else "pending",
+            "created_at": p.get("summary", {}).get("created_at").isoformat() if p.get("summary") and p.get("summary").get("created_at") else None,
+            "distance_meters": p.get("distance_meters")
         })
+
+    total = Place.objects(__raw__=filters).count()
 
     return jsonify({
         "places": places,
@@ -99,30 +108,52 @@ def submit_place():
 
     fake_tx_id = f"DEV_TX_{uuid.uuid4().hex}"
 
-    place_doc = {
-        "transaction_id": fake_tx_id,
-        "name": data["name"],
-        "description": data.get("description"),
-        "location": data["location"],  # GeoJSON
-        "place_type": data["place_type"],
-        "category": data["category"],
-        "era": data.get("era"),
-        "address": data.get("address"),
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc),
-        "upvote_count": 0,
-        "safety_score": 0
-    }
+    geo_point = GeoJSONPoint(
+       type=data["location"].get("type", "Point"),
+        coordinates=data["location"]["coordinates"]
+    )
 
-    result = places_collection.insert_one(place_doc)
-    place_id = str(result.inserted_id)
+    summary = PlaceSummary(
+        id=str(uuid.uuid4()),
+        transaction_id=f"DEV_TX_{uuid.uuid4().hex}",
+        name=data["name"],
+        location=geo_point,
+        place_type=data["place_type"],
+        category=data["category"],
+        status="pending",
+        created_at=datetime.now(timezone.utc)
+    )
+
+    detail = PlaceDetail(
+        description=data.get("description"),
+        era=data.get("era"),
+        photos=data.get("photos"),
+        address=data.get("address"),
+        additional_info=data.get("additional_info"),
+        indexed_at=datetime.now(timezone.utc)
+    )
+
+    place = Place(
+        name=data["name"],
+        location=geo_point,
+        place_type=data["place_type"],
+        category=data["category"],
+        description=data.get("description"),
+        era=data.get("era"),
+        photos=data.get("photos"),
+        address=data.get("address"),
+        additional_info=data.get("additional_info"),
+        summary=summary,
+        detail=detail
+    )
+
+    place.save()
 
     return jsonify({
         "transaction_id": fake_tx_id,
-        "place_id": place_id,
+        "place_id": str(place.id),
         "status": "pending"
     }), 201
-
 
 # get place by id (transaction or regular id?)
 @app.route("/places/<place_id>", methods=["GET"])
@@ -202,12 +233,12 @@ def get_safety_scores():
     pass
 
 # TODO: get pending submissions 
-@app.route("/moderation/queue", method=["GET"])
+@app.route("/moderation/queue", methods=["GET"])
 def get_submissions():
     pass
 # TODO: get pending submissions by id
 @app.route("/moderation/places/<id>", methods=["GET"])
-def get_submissions(id):
+def get_submissions_by_id(id):
     pass
 
 if __name__ == "__main__":

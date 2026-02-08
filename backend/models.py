@@ -34,7 +34,7 @@ class OnChainData(EmbeddedDocument):
 # -----------------------------
 class PlaceSummary(EmbeddedDocument):
     id = StringField()  # MongoDB _id stored as string
-    transaction_id = StringField(required=True, unique=True)
+    transaction_id = StringField(required=True, unique=True, sparse=True)
     name = StringField(required=True)
     location = EmbeddedDocumentField(GeoJSONPoint, required=True)
     place_type = StringField(required=True, choices=["current", "historical"])
@@ -83,4 +83,10 @@ class Place(Document):
     summary = EmbeddedDocumentField(PlaceSummary)
     detail = EmbeddedDocumentField(PlaceDetail)
     
-    meta = {"collection": "places"}
+    meta = {
+        "collection": "places",
+        "indexes": [
+            {"fields": ["location"], "type": "2dsphere"}  # <- THIS IS REQUIRED
+        ]
+    }
+
