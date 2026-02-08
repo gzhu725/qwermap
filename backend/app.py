@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from bson import ObjectId
 import os
 
-
+# TODO: INTEGRATE SOLANA?
 # Global Vars
 
 app = Flask(__name__)
@@ -156,6 +156,47 @@ def get_place_by_id(place_id):
     }
 
     return jsonify(place_json), 200
+
+# upvote a place
+@app.route("/places/<place_id>/upvote", methods=["POST"])
+def upvote_place(place_id):
+    fingerprint = request.headers.get("X-Client-Fingerprint")
+    if not fingerprint:
+        return jsonify({"error": "Missing Fingerprint!"}), 400
+    
+    place = None 
+
+    # see "find by place" 
+    if ObjectId.is_valid(place_id):
+        place = places_collection.find_one({"_id": ObjectId(place_id)})
+    if not place:
+        place = places_collection.find_one({"transaction_id": place_id})
+    if not place:
+        return jsonify({"error": "Place not found"}), 404
+    
+    # track who already upvoted
+    upvoted_by = place.get("upvoted_by", [])
+    if fingerprint in upvoted_by:
+        return jsonify({"error": "Already upvoted"}), 409
+
+    # increment upvote atomically and add fingerprint to list
+    updated = places_collection.find_one_and_update(
+        {"_id": place["_id"]},
+        {
+            "$inc": {"upvote_count": 1},
+            "$push": {"upvoted_by": fingerprint}
+        },
+        return_document=True
+    )
+
+    return jsonify({
+        "transaction_id": f"DEV_TX_{uuid.uuid4().hex}",  # fake Solana tx ID
+        "new_upvote_count": updated["upvote_count"],
+        "new_safety_score": 0.001
+    }), 200
+    
+
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=8000)
