@@ -1,0 +1,9 @@
+flask
+flask-cors
+pymongo
+mongoengine
+python-dotenv
+redis
+solana
+solders
+gunicorn

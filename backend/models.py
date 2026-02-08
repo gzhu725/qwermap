@@ -30,6 +30,25 @@ class OnChainData(EmbeddedDocument):
 
 
 # -----------------------------
+# Historical Event (embedded in Place)
+# -----------------------------
+class HistoricalEvent(EmbeddedDocument):
+    title = StringField(required=True, max_length=200)
+    date = StringField()            # flexible: "1969-06-28", "1970s", "June 1969"
+    description = StringField(max_length=1000)
+    source_url = StringField()      # citation link
+
+
+# -----------------------------
+# Related Figure (embedded in Place)
+# -----------------------------
+class RelatedFigure(EmbeddedDocument):
+    name = StringField(required=True, max_length=200)
+    role = StringField(max_length=200)   # e.g. "Founder", "Activist", "Patron"
+    description = StringField(max_length=500)
+
+
+# -----------------------------
 # PlaceSummary (embedded for Place)
 # -----------------------------
 class PlaceSummary(EmbeddedDocument):
@@ -71,22 +90,45 @@ class Place(Document):
         "bar", "cafe", "library", "community_center", "bookstore",
         "park", "art_space", "other"
     ])
-    
+
+    # On-chain + moderation
+    transaction_id = StringField(required=True, unique=True)
+    status = StringField(choices=["pending", "approved", "rejected"], default="pending")
+    upvote_count = IntField(default=0)
+    safety_score = FloatField(default=0)
+
     # Optional/Detail fields
     description = StringField(max_length=2000)
     era = StringField()
     photos = ListField(StringField(), max_length=5)
     address = StringField()
     additional_info = DictField()
-    
-    # Embedded summary and detail
-    summary = EmbeddedDocumentField(PlaceSummary)
-    detail = EmbeddedDocumentField(PlaceDetail)
-    
+
+    # Digital humanities fields
+    events = ListField(EmbeddedDocumentField(HistoricalEvent))
+    related_figures = ListField(EmbeddedDocumentField(RelatedFigure))
+    movements = ListField(StringField())
+    community_tags = ListField(StringField())
+    site_types = ListField(StringField())
+    year_opened = IntField()
+    year_closed = IntField()
+    still_exists = StringField(choices=["yes", "no", "partial", "unknown"])
+    significance = StringField(choices=["local", "regional", "national", "international"])
+
+    # For moderation/auditing
+    on_chain_data = EmbeddedDocumentField(OnChainData)
+    indexed_at = DateTimeField()
+    created_at = DateTimeField(default=datetime.utcnow)
+
+    # Optional tracking of upvotes (used for audits; primary dedupe uses Redis)
+    upvoted_by = ListField(StringField())
+
     meta = {
         "collection": "places",
         "indexes": [
-            {"fields": ["location"], "type": "2dsphere"}  # <- THIS IS REQUIRED
+            {"fields": [("location", "2dsphere")]},
+            {"fields": ["movements"]},
+            {"fields": ["community_tags"]},
+            {"fields": ["significance"]},
         ]
     }
-
