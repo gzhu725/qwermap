@@ -195,8 +195,20 @@ def upvote_place(place_id):
         "new_safety_score": 0.001
     }), 200
     
+# get safety scores
+# TODO: How to actually calculate with solana? 
+@app.route("/safety-scores", methods=["GET"])
+def get_safety_scores():
+    pass
 
-
+# TODO: get pending submissions 
+@app.route("/moderation/queue", method=["GET"])
+def get_submissions():
+    pass
+# TODO: get pending submissions by id
+@app.route("/moderation/places/<id>", methods=["GET"])
+def get_submissions(id):
+    pass
 
 if __name__ == "__main__":
     app.run(debug=True, port=8000)
