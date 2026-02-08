@@ -1,0 +1,475 @@
+openapi: 3.0.3
+info:
+  title: QWERMap API
+  description: Backend API for crowdsourced LGBTQ+ third places and historical sites map with Solana-backed verification
+  version: 1.0.0
+  contact:
+    name: QWERMap Team
+
+servers:
+  - url: https://api.qwermap.com/v1
+    description: Production server
+  - url: http://localhost:8000/v1
+    description: Local development
+
+tags:
+  - name: places
+    description: Third places and historical sites
+  - name: interactions
+    description: Upvotes and user engagement
+  - name: moderation
+    description: Content moderation (optional for MVP)
+
+paths:
+  /places:
+    get:
+      tags: [places]
+      summary: Get places near a location
+      description: Returns current third places and/or historical sites within specified radius, filtered by type
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          example: 34.0522
+        - name: lon
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          example: -118.2437
+        - name: radius
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 5000
+            description: Search radius in meters
+          example: 10000
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [current, historical, all]
+            default: all
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [bar, cafe, library, community_center, bookstore, park, art_space, other]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+            description: Filter by moderation status (for future use)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  places:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlaceSummary'
+                  total:
+                    type: integer
+                  offset:
+                    type: integer
+                  limit:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    post:
+      tags: [places]
+      summary: Submit a new place
+      description: Creates submission on Solana blockchain, returns transaction ID, then indexes to MongoDB
+      parameters:
+        - name: X-Client-Fingerprint
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Client fingerprint hash (derived from IP + User-Agent for spam prevention)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaceSubmission'
+      responses:
+        '201':
+          description: Place submitted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transaction_id:
+                    type: string
+                    description: Solana transaction signature
+                    example: "5vwJm7W..."
+                  place_id:
+                    type: string
+                    description: MongoDB document ID (available after indexing)
+                  status:
+                    type: string
+                    enum: [pending, approved]
+                    description: Moderation status (auto-approved for MVP)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /places/{id}:
+    get:
+      tags: [places]
+      summary: Get detailed place information
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: MongoDB document ID or Solana transaction ID
+      responses:
+        '200':
+          description: Detailed place information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /places/{id}/upvote:
+    post:
+      tags: [interactions]
+      summary: Upvote/verify a place
+      description: Records upvote on Solana, updates safety score in MongoDB cache
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Client-Fingerprint
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Upvote recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transaction_id:
+                    type: string
+                  new_upvote_count:
+                    type: integer
+                  new_safety_score:
+                    type: number
+                    format: float
+        '409':
+          description: Already upvoted from this fingerprint
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /safety-scores:
+    get:
+      tags: [places]
+      summary: Get aggregated safety scores for regions
+      description: Returns safety scores for cities/regions based on place density and upvotes
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: lon
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: radius
+          in: query
+          schema:
+            type: integer
+            default: 50000
+            description: Radius in meters for score calculation
+      responses:
+        '200':
+          description: Regional safety score
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    type: object
+                    properties:
+                      lat:
+                        type: number
+                      lon:
+                        type: number
+                  radius_meters:
+                    type: integer
+                  safety_score:
+                    type: number
+                    format: float
+                    description: Computed score 0-100 based on place density and upvotes
+                  place_count:
+                    type: integer
+                  total_upvotes:
+                    type: integer
+
+  /moderation/queue:
+    get:
+      tags: [moderation]
+      summary: Get pending submissions (future use)
+      description: Returns places awaiting moderation approval
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Pending submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlaceDetail'
+
+  /moderation/places/{id}:
+    patch:
+      tags: [moderation]
+      summary: Moderate a submission (future use)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [approved, rejected]
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Moderation action applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceDetail'
+
+components:
+  schemas:
+    PlaceSubmission:
+      type: object
+      required:
+        - name
+        - location
+        - place_type
+        - category
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          example: "The Abbey Food & Bar"
+        description:
+          type: string
+          maxLength: 2000
+          example: "Historic LGBTQ+ bar in West Hollywood, operating since 1991"
+        location:
+          $ref: '#/components/schemas/GeoJSONPoint'
+        place_type:
+          type: string
+          enum: [current, historical]
+          description: Whether this is a currently operating space or historical site
+        category:
+          type: string
+          enum: [bar, cafe, library, community_center, bookstore, park, art_space, other]
+        era:
+          type: string
+          description: For historical places (e.g., "1960s-1980s")
+          example: "1990s-present"
+        photos:
+          type: array
+          items:
+            type: string
+            format: uri
+          maxItems: 5
+          example: ["https://i.imgur.com/abc123.jpg"]
+        address:
+          type: string
+          example: "692 N Robertson Blvd, West Hollywood, CA 90069"
+        additional_info:
+          type: object
+          description: Flexible field for oral histories, events, etc.
+          additionalProperties: true
+
+    PlaceSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          description: MongoDB _id
+        transaction_id:
+          type: string
+          description: Solana transaction signature
+        name:
+          type: string
+        location:
+          $ref: '#/components/schemas/GeoJSONPoint'
+        place_type:
+          type: string
+          enum: [current, historical]
+        category:
+          type: string
+        safety_score:
+          type: number
+          format: float
+          description: Computed from upvotes (0-100 scale)
+        upvote_count:
+          type: integer
+        distance_meters:
+          type: number
+          description: Distance from query point
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        created_at:
+          type: string
+          format: date-time
+
+    PlaceDetail:
+      allOf:
+        - $ref: '#/components/schemas/PlaceSummary'
+        - type: object
+          properties:
+            description:
+              type: string
+            era:
+              type: string
+            photos:
+              type: array
+              items:
+                type: string
+            address:
+              type: string
+            additional_info:
+              type: object
+            on_chain_data:
+              type: object
+              description: Full Solana account data
+              properties:
+                account_address:
+                  type: string
+                raw_data:
+                  type: object
+            indexed_at:
+              type: string
+              format: date-time
+              description: When this was synced from Solana to MongoDB
+
+    GeoJSONPoint:
+      type: object
+      required:
+        - type
+        - coordinates
+      properties:
+        type:
+          type: string
+          enum: [Point]
+        coordinates:
+          type: array
+          items:
+            type: number
+          minItems: 2
+          maxItems: 2
+          description: "[longitude, latitude]"
+          example: [-118.2437, 34.0522]
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Bad Request"
+            message: "Invalid coordinates provided"
+            code: "INVALID_COORDS"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Not Found"
+            message: "Place with given ID does not exist"
+            code: "PLACE_NOT_FOUND"
+
+    RateLimited:
+      description: Too many requests from this fingerprint
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Rate Limited"
+            message: "Maximum 5 submissions per hour from this client"
+            code: "RATE_LIMIT_EXCEEDED"
