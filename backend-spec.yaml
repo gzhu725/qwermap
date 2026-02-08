@@ -311,6 +311,8 @@ components:
         - location
         - place_type
         - category
+        - PlaceSummary
+        - PlaceDetail
       properties:
         name:
           type: string
@@ -347,6 +349,10 @@ components:
           type: object
           description: Flexible field for oral histories, events, etc.
           additionalProperties: true
+        PlaceSummary:
+          type: PlaceSummary 
+        PlaceDetail:
+          type: PlaceDetail
 
     PlaceSummary:
       type: object
