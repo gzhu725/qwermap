@@ -1,4 +1,4 @@
-# QWERMap
+# QWERMaps
 
 An interactive map for discovering and preserving LGBTQ+ third places — bars, cafes, libraries, community centers, and historical sites that serve as vital gathering spaces for queer communities.
 
