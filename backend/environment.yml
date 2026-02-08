@@ -1,0 +1,36 @@
+name: qwerhacks
+channels:
+  - defaults
+dependencies:
+  - blinker=1.9.0=py314hca03da5_1
+  - bzip2=1.0.8=h80987f9_6
+  - ca-certificates=2025.12.2=hca03da5_0
+  - click=8.2.1=py314hca03da5_1
+  - dnspython=2.8.0=py314hca03da5_0
+  - flask=3.1.2=py314hca03da5_0
+  - flask-cors=6.0.2=py314hca03da5_0
+  - itsdangerous=2.2.0=py314hca03da5_0
+  - jinja2=3.1.6=py314hca03da5_0
+  - libcxx=21.1.8=hb4ce287_0
+  - libexpat=2.7.4=h50f4ffc_0
+  - libffi=3.4.4=hca03da5_1
+  - libmpdec=4.0.0=h80987f9_0
+  - libzlib=1.3.1=h5f15de7_0
+  - lz4-c=1.9.4=h313beb8_1
+  - markupsafe=3.0.2=py314h75312c3_0
+  - ncurses=6.5=hee39554_0
+  - openssl=3.0.19=ha0b305a_0
+  - pip=25.3=pyh0d26453_0
+  - pymongo=4.15.5=py314hbe26d11_0
+  - python=3.14.2=h1858270_101_cp314
+  - python-dotenv=1.1.0=py314hca03da5_0
+  - python_abi=3.14=2_cp314
+  - readline=8.3=h0b18652_0
+  - sqlite=3.51.1=hab6afd1_0
+  - tk=8.6.15=hcd8a7d5_0
+  - tzdata=2025c=he532380_0
+  - werkzeug=3.1.3=py314hca03da5_0
+  - xz=5.6.4=h80987f9_1
+  - zlib=1.3.1=h5f15de7_0
+  - zstd=1.5.7=h817c040_0
+prefix: /Users/arnabghosh/anaconda3/envs/qwerhacks
