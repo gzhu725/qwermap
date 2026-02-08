@@ -1,7 +1,30 @@
-/venv
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+dist/
+build/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+
+# Environment files
 .env
 .env.local
-__pycache__/
 backend/env.local
 backend/.env.local
+
+# Node / installed modules
+node_modules/
+
+# Keys / secrets
 keys/
